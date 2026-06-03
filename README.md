@@ -17,14 +17,16 @@ npm run dev      # http://localhost:3000
 set the project root to `client/`).
 
 ### Controls (in-game)
-- **WASD** move / strafe · **← →** turn
+- **W / A / S / D** move / strafe · **O / P** turn
 - **Mouse** aim (angles your aim within a front cone; it doesn't spin you)
-- **Space / F / E** shoot (hold for full-auto)
-- **G / R / /** jump
-- **C** cycle camera (shoulder L/R, far, close, first-person) · **Z** zoom · **X** free-look
-- **P** pause · look-sensitivity slider top-left
+- **K** shoot (hold for full-auto) · **L** jump
+- **C** cycle camera (shoulder L/R, far, close, first-person) · **I** zoom · **X** free-look
+- **Esc** pause · look-sensitivity slider top-left
 
-Click **Start Fight** to wake the agents up. You have 3 lives; best score is saved locally.
+Legacy alternate keys still work: arrows for movement/turning, Space/F/E for shoot, G/R/Slash for
+jump, and Z for zoom.
+
+Click **Start Fight** to wake the agents up. You have 1 life; best score is saved locally.
 
 ## How it works
 - **Player**: `client/public/models/brian.glb` (hero) plus 9 action-pose meshes in

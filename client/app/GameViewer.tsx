@@ -27,7 +27,7 @@ const CAM_PRESETS: CamPreset[] = [
   { name: "Close", shoulder: 0.55, height: 1.55, dist: 3.0, look: 9, aim: 1.25, fp: false },
   { name: "First-person", shoulder: 0, height: 1.62, dist: 0, look: 10, aim: 1.62, fp: true },
 ];
-// zoom multipliers — cycle with Z
+// zoom multipliers — cycle with Z/I
 const ZOOM_LEVELS = [0.7, 1.0, 1.4, 2.0];
 
 // rear-view picture-in-picture (bottom-left), in CSS px
@@ -47,6 +47,7 @@ const ENEMY_SIGHT = 32;     // will fire if player within this range
 const ENEMY_FIRE_CD = 1.7;  // seconds between shots
 const ENEMY_HP = 3;
 const ENEMY_DMG = 12;
+const PLAYER_LIVES = 1;
 
 export default function GameViewer({ src = "/models/brian.glb" }: { src?: string }) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -226,7 +227,7 @@ export default function GameViewer({ src = "/models/brian.glb" }: { src?: string
     let runPhase = 0;     // advances while moving
     let shootTimer = 0;   // >0 while in shoot anim window
     let camPreset = 0;    // index into CAM_PRESETS (C cycles)
-    let zoomIdx = 1;      // index into ZOOM_LEVELS, default 1.0x (Z cycles)
+    let zoomIdx = 1;      // index into ZOOM_LEVELS, default 1.0x (Z/I cycles)
     let camPitch = 0;     // vertical look angle (from the cursor, clamped)
     let aimYaw = 0;       // bounded horizontal aim offset from facing (from the cursor)
     let freeLookOn = false; // X: decouple look/aim from movement (run one way, shoot another)
@@ -347,7 +348,7 @@ export default function GameViewer({ src = "/models/brian.glb" }: { src?: string
       setTimeout(() => setHitFlash(false), 140);
       if (health <= 0) {
         deathsLocal += 1; setDeaths(deathsLocal);
-        if (deathsLocal >= 3) {
+        if (deathsLocal >= PLAYER_LIVES) {
           // out of lives -> game over; agents go passive and you restart from Ready
           startedRef.current = false;
           gameOverRef.current = true;
@@ -365,15 +366,15 @@ export default function GameViewer({ src = "/models/brian.glb" }: { src?: string
     const keys: Keys = {};
     const onKeyDown = (e: KeyboardEvent) => {
       keys[e.code] = true;
-      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "Slash"].includes(e.code)) e.preventDefault();
-      if (e.code === "KeyF" || e.code === "KeyE") { keys["fire"] = true; shoot(); }       // F/E = shoot
-      if (e.code === "KeyG" || e.code === "KeyR" || e.code === "Slash") { if (grounded) { vy = JUMP_V; grounded = false; } }  // G/R/ / = jump
+      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "Slash", "KeyO", "KeyP"].includes(e.code)) e.preventDefault();
+      if (e.code === "KeyF" || e.code === "KeyE" || e.code === "KeyK") { keys["fire"] = true; shoot(); }       // F/E/K = shoot
+      if (e.code === "KeyG" || e.code === "KeyR" || e.code === "KeyL" || e.code === "Slash") { if (grounded) { vy = JUMP_V; grounded = false; } }  // G/R/L/ / = jump
       if (e.code === "Space") { keys["fire"] = true; shoot(); }  // Space = shoot
       if (e.code === "KeyC") {       // C = cycle camera position
         camPreset = (camPreset + 1) % CAM_PRESETS.length;
         setCamName(CAM_PRESETS[camPreset].name);
       }
-      if (e.code === "KeyZ") {       // Z = cycle zoom in/out
+      if (e.code === "KeyZ" || e.code === "KeyI") {       // Z/I = cycle zoom in/out
         zoomIdx = (zoomIdx + 1) % ZOOM_LEVELS.length;
         setZoomLabel(ZOOM_LEVELS[zoomIdx].toFixed(1) + "×");
       }
@@ -382,11 +383,11 @@ export default function GameViewer({ src = "/models/brian.glb" }: { src?: string
         if (!freeLookOn) { heading = moveHeading; camPitch = 0; } // exit: view returns to movement dir
         setFreeLook(freeLookOn);
       }
-      if (e.code === "KeyP") apiRef.current?.togglePause();  // P = pause
+      if (e.code === "Escape") apiRef.current?.togglePause();  // Esc = pause
     };
     const onKeyUp = (e: KeyboardEvent) => {
       keys[e.code] = false;
-      if (e.code === "KeyF" || e.code === "KeyE" || e.code === "Space") keys["fire"] = false;
+      if (e.code === "KeyF" || e.code === "KeyE" || e.code === "KeyK" || e.code === "Space") keys["fire"] = false;
     };
     // mouse aim: the visible cursor IS the aim point. The camera steers toward it and
     // shots raycast from the camera through the cursor — so you hit where you point in any POV.
@@ -469,9 +470,9 @@ export default function GameViewer({ src = "/models/brian.glb" }: { src?: string
       cooldown = Math.max(0, cooldown - dt);
       shootTimer = Math.max(0, shootTimer - dt);
 
-      // arrow ←/→ turn the camera; A/D strafe; W/S + ↑/↓ move
-      if (keys["ArrowLeft"]) heading += TURN_SPEED * dt;
-      if (keys["ArrowRight"]) heading -= TURN_SPEED * dt;
+      // arrow ←/→ or O/P turn the camera; A/D strafe; W/S + ↑/↓ move
+      if (keys["ArrowLeft"] || keys["KeyO"]) heading += TURN_SPEED * dt;
+      if (keys["ArrowRight"] || keys["KeyP"]) heading -= TURN_SPEED * dt;
       // the mouse only ANGLES the aim within a front cone — it never spins you (←/→ turn).
       // only follows the cursor while it's inside the focused window.
       {
@@ -602,7 +603,7 @@ export default function GameViewer({ src = "/models/brian.glb" }: { src?: string
         try { localStorage.setItem("bvto_best", String(scoreLocal)); } catch { /* ignore */ }
       }
 
-      // camera: active preset (C) + zoom (Z) + mouse-look pitch, with wall collision.
+      // camera: active preset (C) + zoom (Z/I) + mouse-look pitch, with wall collision.
       const preset = CAM_PRESETS[camPreset];
       const zoom = ZOOM_LEVELS[zoomIdx];
       const cpz = Math.cos(camPitch), spz = Math.sin(camPitch);
@@ -731,7 +732,7 @@ export default function GameViewer({ src = "/models/brian.glb" }: { src?: string
               >
                 Resume
               </button>
-              <p className="mt-3 text-xs text-zinc-400">press P to resume</p>
+              <p className="mt-3 text-xs text-zinc-400">press Esc to resume</p>
             </div>
           )}
 
@@ -768,7 +769,7 @@ export default function GameViewer({ src = "/models/brian.glb" }: { src?: string
           <div className="pointer-events-none absolute right-4 top-4 rounded-md bg-black/60 px-3 py-1.5 text-right">
             <div className="text-2xl font-bold tabular-nums text-amber-300 drop-shadow">{score}</div>
             <div className="text-[10px] uppercase tracking-widest text-zinc-400">score · best {best}</div>
-            <div className="mt-1 text-[10px] text-rose-300">🔫 enemies: {enemyAlive} · ☠ lives: {3 - deaths}/3</div>
+            <div className="mt-1 text-[10px] text-rose-300">🔫 enemies: {enemyAlive} · ☠ lives: {Math.max(0, PLAYER_LIVES - deaths)}/{PLAYER_LIVES}</div>
             <div className="text-[10px] text-zinc-400">📷 {camName} · {zoomLabel}</div>
             <div className="text-[10px] text-zinc-500">{loadedFrames}/9 anim frames</div>
           </div>
@@ -804,15 +805,15 @@ export default function GameViewer({ src = "/models/brian.glb" }: { src?: string
           )}
 
           <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 rounded-md bg-black/55 px-4 py-2 text-center text-xs text-zinc-200">
-            <span className="font-semibold text-white">WASD</span> move ·{" "}
-            <span className="font-semibold text-white">←→</span> turn ·{" "}
+            <span className="font-semibold text-white">W/A/S/D</span> move ·{" "}
+            <span className="font-semibold text-white">O/P</span> turn ·{" "}
             <span className="font-semibold text-white">Mouse</span> aim ·{" "}
-            <span className="font-semibold text-white">Space/F/E</span> shoot ·{" "}
-            <span className="font-semibold text-white">G/R</span> jump ·{" "}
+            <span className="font-semibold text-white">K</span> shoot ·{" "}
+            <span className="font-semibold text-white">L</span> jump ·{" "}
             <span className="font-semibold text-white">C</span> cam ·{" "}
-            <span className="font-semibold text-white">Z</span> zoom ·{" "}
+            <span className="font-semibold text-white">I</span> zoom ·{" "}
             <span className="font-semibold text-white">X</span> free-look ·{" "}
-            <span className="font-semibold text-white">P</span> pause
+            <span className="font-semibold text-white">Esc</span> pause
           </div>
         </>
       )}

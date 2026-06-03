@@ -45,7 +45,7 @@ export default function Home() {
           ▶ Play
         </button>
         <p className="mt-3 select-none text-xs font-semibold text-zinc-100 drop-shadow-[0_2px_5px_rgba(0,0,0,0.95)] sm:text-sm">
-          WASD move · Mouse aim · Space/F/E shoot · G/R jump · X free-look
+          W/A/S/D move · O/P turn · Mouse aim · K shoot · L jump · I zoom
         </p>
       </div>
 
