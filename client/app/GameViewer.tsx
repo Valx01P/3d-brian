@@ -33,10 +33,11 @@ const ZOOM_LEVELS = [0.7, 1.0, 1.4, 2.0];
 // rear-view picture-in-picture (bottom-left), in CSS px
 const PIP_W = 230, PIP_H = 150, PIP_M = 16;
 
-// the mouse only angles your aim within a cone in FRONT (it never spins you — use ←/→ to turn)
-const AIM_YAW_MAX = 0.65;    // max horizontal aim offset from facing (radians, ~37°)
-const AIM_PITCH_UP = 0.12;   // barely look up — nothing up there
-const AIM_PITCH_DOWN = 0.5;  // can look down toward the ground
+// you aim entirely with the arrow keys: ←/→ swing your facing, ↑/↓ tilt the gun.
+// movement (WASD) never changes where you look, and looking never moves you.
+const AIM_PITCH_UP = 0.55;    // how far up you can aim (radians)
+const AIM_PITCH_DOWN = 0.6;   // how far down you can aim (radians)
+const PITCH_SPEED = 1.8;      // ↑/↓ aim tilt rate (radians/sec, scaled by sensitivity)
 
 // enemy (the suit-clad rifleman) tuning
 const ENEMY_HEIGHT = 1.85;
@@ -228,8 +229,7 @@ export default function GameViewer({ src = "/models/brian.glb" }: { src?: string
     let shootTimer = 0;   // >0 while in shoot anim window
     let camPreset = 0;    // index into CAM_PRESETS (C cycles)
     let zoomIdx = 1;      // index into ZOOM_LEVELS, default 1.0x (Z/I cycles)
-    let camPitch = 0;     // vertical look angle (from the cursor, clamped)
-    let aimYaw = 0;       // bounded horizontal aim offset from facing (from the cursor)
+    let camPitch = 0;     // vertical aim angle (↑/↓ arrows, clamped)
     let freeLookOn = false; // X: decouple look/aim from movement (run one way, shoot another)
     let moveHeading = 0;    // movement direction (frozen while free-looking)
 
@@ -389,32 +389,15 @@ export default function GameViewer({ src = "/models/brian.glb" }: { src?: string
       keys[e.code] = false;
       if (e.code === "KeyF" || e.code === "KeyE" || e.code === "KeyK" || e.code === "Space") keys["fire"] = false;
     };
-    // mouse aim: the visible cursor IS the aim point. The camera steers toward it and
-    // shots raycast from the camera through the cursor — so you hit where you point in any POV.
+    // aim is keyboard-driven (arrow keys) and shots fire toward the center crosshair, so the
+    // mouse is optional — left-click is just an alternate trigger for Space.
     const canvasEl = renderer.domElement;
-    let mouseX = mount.clientWidth / 2, mouseY = mount.clientHeight / 2; // canvas-relative cursor
-    let mouseInside = false; // only steer while the cursor is inside the focused window
     const onMouseDown = (e: MouseEvent) => { if (e.button === 0) { keys["fire"] = true; shoot(); } };
     const onMouseUp = (e: MouseEvent) => { if (e.button === 0) keys["fire"] = false; };
-    const onMouseMove = (e: MouseEvent) => {
-      const rect = canvasEl.getBoundingClientRect();
-      const x = e.clientX - rect.left, y = e.clientY - rect.top;
-      if (x >= 0 && y >= 0 && x <= rect.width && y <= rect.height) {
-        mouseX = x; mouseY = y; mouseInside = true;
-      } else {
-        mouseInside = false; // cursor left the canvas -> stop following it
-      }
-    };
-    const onPointerLeave = () => { mouseInside = false; };
-    const onBlur = () => { mouseInside = false; };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     canvasEl.addEventListener("mousedown", onMouseDown);
-    window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
-    canvasEl.addEventListener("mouseleave", onPointerLeave);
-    document.addEventListener("mouseleave", onPointerLeave);
-    window.addEventListener("blur", onBlur);
 
     // ---- game flow (called from the React overlays / keys) ----
     const OBJECTIVES = [
@@ -470,33 +453,22 @@ export default function GameViewer({ src = "/models/brian.glb" }: { src?: string
       cooldown = Math.max(0, cooldown - dt);
       shootTimer = Math.max(0, shootTimer - dt);
 
-      // arrow ←/→ or O/P turn the camera; A/D strafe; W/S + ↑/↓ move
-      if (keys["ArrowLeft"] || keys["KeyO"]) heading += TURN_SPEED * dt;
-      if (keys["ArrowRight"] || keys["KeyP"]) heading -= TURN_SPEED * dt;
-      // the mouse only ANGLES the aim within a front cone — it never spins you (←/→ turn).
-      // only follows the cursor while it's inside the focused window.
-      {
-        let tYaw = 0, tPitch = 0;
-        if (mouseInside && document.hasFocus()) {
-          const cw = mount.clientWidth || 1, ch = mount.clientHeight || 1;
-          const ox = THREE.MathUtils.clamp((mouseX / cw) * 2 - 1, -1, 1);
-          const oy = THREE.MathUtils.clamp((mouseY / ch) * 2 - 1, -1, 1);
-          tYaw = THREE.MathUtils.clamp(-ox * AIM_YAW_MAX * sensRef.current, -AIM_YAW_MAX, AIM_YAW_MAX);
-          // oy>0 = cursor low = look down; clamp up small, down larger
-          tPitch = THREE.MathUtils.clamp(-oy * AIM_PITCH_DOWN * sensRef.current, -AIM_PITCH_DOWN, AIM_PITCH_UP);
-        }
-        const k = 1 - Math.pow(0.0009, dt); // smooth toward the cursor
-        aimYaw += (tYaw - aimYaw) * k;
-        camPitch += (tPitch - camPitch) * k;
-      }
-      const viewYaw = heading + aimYaw; // facing + bounded aim offset (camera, body, and shots use this)
+      // arrow keys are your aim: ←/→ swing your facing, ↑/↓ tilt the gun. you never move
+      // from looking around. (O/P duplicate ←/→.) sensitivity slider scales the aim rate.
+      const turn = TURN_SPEED * sensRef.current;
+      const pitch = PITCH_SPEED * sensRef.current;
+      if (keys["ArrowLeft"] || keys["KeyO"]) heading += turn * dt;
+      if (keys["ArrowRight"] || keys["KeyP"]) heading -= turn * dt;
+      if (keys["ArrowUp"]) camPitch = Math.min(AIM_PITCH_UP, camPitch + pitch * dt);
+      if (keys["ArrowDown"]) camPitch = Math.max(-AIM_PITCH_DOWN, camPitch - pitch * dt);
+      const viewYaw = heading; // camera, body, and shots all share your aim direction
       // movement follows the look direction, UNLESS free-looking (X) — then it stays locked
       if (!freeLookOn) moveHeading = heading;
       const fwd = new THREE.Vector3(Math.sin(moveHeading), 0, Math.cos(moveHeading));
       const strafeR = new THREE.Vector3(Math.cos(moveHeading), 0, -Math.sin(moveHeading)); // player's right
       let mF = 0, mS = 0;
-      if (keys["KeyW"] || keys["ArrowUp"]) mF += 1;
-      if (keys["KeyS"] || keys["ArrowDown"]) mF -= 1;
+      if (keys["KeyW"]) mF += 1;
+      if (keys["KeyS"]) mF -= 1;
       if (keys["KeyD"]) mS += 1;  // strafe right
       if (keys["KeyA"]) mS -= 1;  // strafe left
       const moveVec = new THREE.Vector3().addScaledVector(fwd, mF).addScaledVector(strafeR, mS);
@@ -637,12 +609,11 @@ export default function GameViewer({ src = "/models/brian.glb" }: { src?: string
         camera.lookAt(new THREE.Vector3().copy(pivot).addScaledVector(lookDir, preset.look));
       }
 
-      // where the cursor points in the world -> the aim/shoot target (enemies first, then ground)
+      // the screen-center crosshair is your aim/shoot target (enemies first, then ground)
       {
         camera.updateMatrixWorld();
         camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
-        const cw = mount.clientWidth || 1, ch = mount.clientHeight || 1;
-        aimNdc.set((mouseX / cw) * 2 - 1, -(mouseY / ch) * 2 + 1);
+        aimNdc.set(0, 0); // dead-center: you aim where the camera/gun points
         aimRay.setFromCamera(aimNdc, camera);
         const objs: THREE.Object3D[] = [floor];
         for (const e of enemies) if (e.alive) objs.push(e.obj);
@@ -687,11 +658,7 @@ export default function GameViewer({ src = "/models/brian.glb" }: { src?: string
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       canvasEl.removeEventListener("mousedown", onMouseDown);
-      window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
-      canvasEl.removeEventListener("mouseleave", onPointerLeave);
-      document.removeEventListener("mouseleave", onPointerLeave);
-      window.removeEventListener("blur", onBlur);
       pmrem.dispose();
       renderer.dispose();
       if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
@@ -704,6 +671,17 @@ export default function GameViewer({ src = "/models/brian.glb" }: { src?: string
         <>
           {/* damage flash */}
           {hitFlash && <div className="pointer-events-none absolute inset-0 bg-red-600/30" />}
+
+          {/* center crosshair — you fire toward this; aim it with the arrow keys */}
+          <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+            <div className="relative h-5 w-5">
+              <div className="absolute left-1/2 top-0 h-2 w-px -translate-x-1/2 bg-white/80" />
+              <div className="absolute bottom-0 left-1/2 h-2 w-px -translate-x-1/2 bg-white/80" />
+              <div className="absolute left-0 top-1/2 h-px w-2 -translate-y-1/2 bg-white/80" />
+              <div className="absolute right-0 top-1/2 h-px w-2 -translate-y-1/2 bg-white/80" />
+              <div className="absolute left-1/2 top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-rose-400" />
+            </div>
+          </div>
 
           {/* passive phase — explore freely; a small Start control sits on the left */}
           {!armed && !gameOver && (
@@ -754,10 +732,10 @@ export default function GameViewer({ src = "/models/brian.glb" }: { src?: string
             </div>
           )}
 
-          {/* look-sensitivity slider */}
+          {/* aim-speed slider — scales how fast the arrow keys swing/tilt your aim */}
           <div className="pointer-events-auto absolute left-4 top-16 w-44 select-none rounded-md bg-black/55 px-3 py-2">
             <div className="flex justify-between text-[10px] uppercase tracking-wider text-zinc-300">
-              <span>Look sensitivity</span><span className="tabular-nums">{sens.toFixed(2)}×</span>
+              <span>Aim speed</span><span className="tabular-nums">{sens.toFixed(2)}×</span>
             </div>
             <input
               type="range" min={0.25} max={3} step={0.05} value={sens}
@@ -806,13 +784,12 @@ export default function GameViewer({ src = "/models/brian.glb" }: { src?: string
 
           <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 rounded-md bg-black/55 px-4 py-2 text-center text-xs text-zinc-200">
             <span className="font-semibold text-white">W/A/S/D</span> move ·{" "}
-            <span className="font-semibold text-white">O/P</span> turn ·{" "}
-            <span className="font-semibold text-white">Mouse</span> aim ·{" "}
-            <span className="font-semibold text-white">K</span> shoot ·{" "}
+            <span className="font-semibold text-white">←/→</span> aim turn ·{" "}
+            <span className="font-semibold text-white">↑/↓</span> aim up/down ·{" "}
+            <span className="font-semibold text-white">Space</span> shoot ·{" "}
             <span className="font-semibold text-white">L</span> jump ·{" "}
             <span className="font-semibold text-white">C</span> cam ·{" "}
             <span className="font-semibold text-white">I</span> zoom ·{" "}
-            <span className="font-semibold text-white">X</span> free-look ·{" "}
             <span className="font-semibold text-white">Esc</span> pause
           </div>
         </>
